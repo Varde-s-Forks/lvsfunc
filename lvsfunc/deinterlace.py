@@ -7,7 +7,7 @@ import time
 import warnings
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import vapoursynth as vs
 from vsutil import Dither, depth, get_depth, get_w, get_y
@@ -373,16 +373,16 @@ def fix_telecined_fades(clip: vs.VideoNode, tff: Optional[Union[bool, int]] = No
     :return:            Clip with only fades fixed
 
     """
-    def _ftf(n: int, f: List[vs.VideoFrame]) -> vs.VideoNode:
+    def _ftf(n: int, f: List[vs.VideoFrame], seps_: Tuple[vs.VideoNode, vs.VideoNode]) -> vs.VideoNode:
         avg = (get_prop(f[0], 'PlaneStatsAverage', float),
                get_prop(f[1], 'PlaneStatsAverage', float))
 
         if avg[0] != avg[1]:
             mean = sum(avg) / 2
-            fixed = (sep[0].std.Expr(f"x {mean} {avg[0]} / dup {thr} <= swap 1 ? *"),
-                     sep[1].std.Expr(f"x {mean} {avg[1]} / *"))
+            fixed = (seps_[0].std.Expr(f"x {mean} {avg[0]} / dup {thr} <= swap 1 ? *"),
+                     seps_[1].std.Expr(f"x {mean} {avg[1]} / *"))
         else:
-            fixed = sep  # type: ignore
+            fixed = seps_
 
         return core.std.Interleave(fixed).std.DoubleWeave()[::2]
 
@@ -396,8 +396,8 @@ def fix_telecined_fades(clip: vs.VideoNode, tff: Optional[Union[bool, int]] = No
     bits = get_depth(clip)
 
     sep = clip32.std.SeparateFields().std.PlaneStats()
-    sep = sep[::2], sep[1::2]  # type: ignore # I know this isn't good, but frameeval breaks otherwise
-    ftf = core.std.FrameEval(clip32, _ftf, sep)  # and I don't know how or why
+    seps = sep[::2], sep[1::2]
+    ftf = core.std.FrameEval(clip32, partial(_ftf, seps_=seps), seps)
 
     if bits == 32:
         warnings.warn("fix_telecined_fades: 'Make sure to dither down BEFORE setting the FieldBased prop to 0! "
